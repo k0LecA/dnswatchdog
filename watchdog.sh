@@ -13,6 +13,9 @@ config="./config"
 #GLOBAL VARIABLES
 declare -a ips=()
 pointer=0
+DNS_SERVER="127.0.0.1"
+ZONE="example.com"
+RECORD="test.example.com"
 
 read_config(){
     while read -r line
@@ -59,12 +62,14 @@ monitor_servers(){
             if [ $i -le $pointer ]
             then
                 pointer=$i
+                update_dns
             fi
         else
             echo -en "${RED}down${RESET}${CLEAR_LINE}"
             if [ $pointer -eq $i ]
             then
                 pointer+=1
+                update_dns
             fi
         fi
 
@@ -80,26 +85,45 @@ monitor_servers(){
     done
 }
 
-read_config
-clear
-echo "-----------------------------------------------"
-echo "test.example.com -> "
-echo "-----------------------------------------------"
+update_dns(){
+    NEW_IP=${ips[$pointer]}
+    nsupdate <<EOF
+server $DNS_SERVER
+zone $ZONE
+update delete $RECORD A
+update add $RECORD 60 A $NEW_IP
+send
+EOF
+}
 
-#     row  column
-tput cup 3 3
-echo -n "IP"
-tput cup 3 20
-echo -n "ping"
-tput cup 3 30
-echo -n "https"
-echo
-while true
-do
-    tput cup 1 21
-    echo -ne "${ips[$pointer]}${CLEAR_LINE}"
-    #clear
-    monitor_servers
-    #echo $pointer
-    sleep 1
-done
+
+main(){
+#set -- $input panaudoti "192.168.0.0  1  1  0  1"
+#                          $1         $2 $3 $4 $5
+
+    read_config
+    clear
+    echo "-----------------------------------------------"
+    echo "test.example.com -> "
+    echo "-----------------------------------------------"
+
+    #     row  column
+    tput cup 3 3
+    echo -n "IP"
+    tput cup 3 20
+    echo -n "ping"
+    tput cup 3 30
+    echo -n "https"
+    echo
+    while true
+    do
+        tput cup 1 21
+        echo -ne "${ips[$pointer]}${CLEAR_LINE}"
+        #clear
+        monitor_servers
+        #echo $pointer
+        sleep 1
+    done
+}
+
+main "$@"
