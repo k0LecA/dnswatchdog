@@ -41,49 +41,26 @@ check_server() {
 }
 
 
-check_ping(){
+monitor_servers(){
     for i in "${!ips[@]}"
     do
         ip="${ips[$i]}"
 
 
         #if ping -c 1 -W 1 $ip > /dev/null 2>&1;
+        row=$((1+i))
+        tput cup $row 0
+        echo -n "$ip"
+        tput cup $row 22
+
         if check_server "$ip" "ping"
         then
-            if [ "$i" -eq "$pointer" ]
-            then
-                row=$((1+i))
-                tput cup "$row" 0
-                echo -n "$ip"
-                tput cup "$row" 22
-                echo -ne "${GREEN}ok${RESET} <- test.example.com"
-            else
-                row=$((1+i))
-                tput cup "$row" 0
-                echo -n "$ip"
-                tput cup "$row" 22
-                echo -ne "\e[32mok\e[0m\e[K"
-            fi
-            if [ "$i" -lt "$pointer" ]
-            then
-                row=$((1+i))
-                tput cup "$row" 0
-                echo -n "$ip"
-                tput cup "$row" 22
-                echo -ne "\e[32mok\e[0m <- test.example.com"
-                pointer=$i
-            fi
+            echo -en "${GREEN}ok${RESET}${CLEAR_LINE}"
         else
-            if [ "$i" -eq "$pointer" ]
-            then
-                pointer+=1
-            fi
-                row=$((1+i))
-                tput cup "$row" 0
-                echo -n "$ip"
-                tput cup "$row" 22
-                echo -ne "\e[31mdown\e[0m\e[K"
+            echo -en "${RED}down${RESET}${CLEAR_LINE}"
         fi
+
+
 
 
     done
@@ -101,7 +78,7 @@ echo
 while true
 do
     #clear
-    check_ping
+    monitor_servers
     #echo $pointer
     sleep 1
 done
