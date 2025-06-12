@@ -48,12 +48,28 @@ monitor_servers(){
 
 
         #if ping -c 1 -W 1 $ip > /dev/null 2>&1;
-        row=$((1+i))
+        row=$((4+i))
         tput cup $row 0
         echo -n "$ip"
-        tput cup $row 22
-
+        
+        tput cup $row 21
         if check_server "$ip" "ping"
+        then
+            echo -en "${GREEN}ok${RESET}${CLEAR_LINE}"
+            if [ $i -le $pointer ]
+            then
+                pointer=$i
+            fi
+        else
+            echo -en "${RED}down${RESET}${CLEAR_LINE}"
+            if [ $pointer -eq $i ]
+            then
+                pointer+=1
+            fi
+        fi
+
+        tput cup $row 32
+        if check_server "$ip" "https"
         then
             echo -en "${GREEN}ok${RESET}${CLEAR_LINE}"
         else
@@ -61,22 +77,27 @@ monitor_servers(){
         fi
 
 
-
-
     done
 }
 
 read_config
-
 clear
+echo "-----------------------------------------------"
+echo "test.example.com -> "
+echo "-----------------------------------------------"
+
 #     row  column
-tput cup 0 3
+tput cup 3 3
 echo -n "IP"
-tput cup 0 20
-echo -n "Status"
+tput cup 3 20
+echo -n "ping"
+tput cup 3 30
+echo -n "https"
 echo
 while true
 do
+    tput cup 1 21
+    echo -ne "${ips[$pointer]}${CLEAR_LINE}"
     #clear
     monitor_servers
     #echo $pointer
