@@ -8,20 +8,39 @@ RESET='\e[0m'
 CLEAR_LINE='\e[K'
 
 #CONFIGS
-config="./config"
+CONFIG_FILE="./watchdog.cfg"
 
 #GLOBAL VARIABLES
 declare -a ips=()
 pointer=0
-DNS_SERVER="127.0.0.1"
-ZONE="example.com"
-RECORD="test.example.com"
+request_sent=1
+votes=0
 
 read_config(){
-    while read -r line
-    do
-        ips+=("$line")
-    done < "$config"
+    [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+
+    #DNS
+    DNS_SERVER=${DNS_SERVER:-127.0.0.1}
+    ZONE=${ZONE:-"example.com"}
+    RECORD=${RECORD:-"test.example.com"}
+
+    #monitoring
+    #method="ping"
+    ping_count=${ping_count:-1}
+    ping_timeout=${ping_timeout:-1}
+
+    #method="https"
+    #curl_timeout=2
+
+    #method="port"
+    #port=80
+
+    #quorum listening
+    #listen_port=25565
+
+    #ip list
+    #sort by priority from highest to lowest
+    ips=${ips:-("172.16.0.3" "1.1.1.1" "8.8.8.8")}
 }
 
 check_server() {
@@ -45,13 +64,12 @@ check_server() {
 
 
 monitor_servers(){
+    #monitor all servers
     for i in "${!ips[@]}"
     do
         ip="${ips[$i]}"
 
-
-        #if ping -c 1 -W 1 $ip > /dev/null 2>&1;
-        row=$((4+i))
+        row=$((6+i))
         tput cup $row 0
         echo -n "$ip"
         
@@ -59,18 +77,12 @@ monitor_servers(){
         if check_server "$ip" "ping"
         then
             echo -en "${GREEN}ok${RESET}${CLEAR_LINE}"
-            if [ $i -le $pointer ]
-            then
-                pointer=$i
-                update_dns
-            fi
+            #if [ $i -le $pointer ]
+            #then
+            #    echo
+            #fi
         else
             echo -en "${RED}down${RESET}${CLEAR_LINE}"
-            if [ $pointer -eq $i ]
-            then
-                pointer+=1
-                update_dns
-            fi
         fi
 
         tput cup $row 32
@@ -80,9 +92,23 @@ monitor_servers(){
         else
             echo -en "${RED}down${RESET}${CLEAR_LINE}"
         fi
-
-
     done
+
+    #check current ip
+    #check if request was sent
+    if [ $request_sent -eq 1 ]
+    then
+        #if request was sent check if current server is accessible
+        if ! check_server ${ips[$pointer]} "ping"
+        then
+            send_request
+        fi
+    fi
+}
+
+send_request(){
+    echo "next" | socat - TCP:172.16.0.3:25565
+    request_sent=0
 }
 
 update_dns(){
@@ -95,8 +121,17 @@ update add $RECORD 60 A $NEW_IP
 send
 EOF
 
-    tput cup 1 21
-    echo -ne "${ips[$pointer]}${CLEAR_LINE}"
+    tput cup 1 20
+    echo -ne "${CLEAR_LINE}${ips[$pointer]}"
+}
+
+decide(){
+    if [ $votes -gt 2 ]
+    then
+        pointer+=1
+        update_dns
+        votes=0
+    fi
 }
 
 start_listener()
@@ -109,8 +144,12 @@ listen(){
     if [ -f /tmp/listener_messages ]; then
         while IFS= read -r line; do
             messages+=("$line")
+            if [ "$line" = "next" ]
+            then
+                votes+=1
+            fi
         done < /tmp/listener_messages
-        #> /tmp/listener_messages  # clear the file after reading
+        > /tmp/listener_messages  # clear the file after reading
     fi
 }
 
@@ -133,32 +172,34 @@ cleanup()
 update_header(){
     clear
     echo "-----------------------------------------------"
-    echo "test.example.com -> "
+    echo "test.example.com -> "${ips[$pointer]}
+    echo "DNS_SERVER: "$DNS_SERVER
+    echo "ping_timeout: " $ping_timeout
     echo "-----------------------------------------------"
 
     #     row  column
-    tput cup 3 3
+    tput cup 5 3
     echo -n "IP"
-    tput cup 3 20
+    tput cup 5 20
     echo -n "ping"
-    tput cup 3 30
+    tput cup 5 30
     echo -n "https"
     echo
 
 }
 
 main(){
-    trap cleanup SIGINT SIGTERM EXIT
-#set -- $input panaudoti "192.168.0.0  1  1  0  1"
-#                          $1         $2 $3 $4 $5
-    read_config
-    start_listener
+    trap cleanup SIGINT SIGTERM EXIT #proper exit with CTRL+C
+
+    read_config #read configuration and get ip list
+    start_listener #start listening with socat, will be added quorum
     update_header
     while true
     do
         listen
-        monitor_servers
-        sleep 1
+        decide
+        monitor_servers 
+        sleep 0.5
     done
 }
 
