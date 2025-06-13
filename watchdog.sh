@@ -94,14 +94,43 @@ update delete $RECORD A
 update add $RECORD 60 A $NEW_IP
 send
 EOF
+
+    tput cup 1 21
+    echo -ne "${ips[$pointer]}${CLEAR_LINE}"
 }
 
+start_listener()
+{
+    socat TCP-LISTEN:25565,fork SYSTEM:'while read line; do echo "$line" >> /tmp/listener_messages; done' &
+listener_pid=$!
+}
 
-main(){
-#set -- $input panaudoti "192.168.0.0  1  1  0  1"
-#                          $1         $2 $3 $4 $5
+listen(){
+    if [ -f /tmp/listener_messages ]; then
+        while IFS= read -r line; do
+            messages+=("$line")
+        done < /tmp/listener_messages
+        #> /tmp/listener_messages  # clear the file after reading
+    fi
+}
 
-    read_config
+stop_listener()
+{
+    if [ $listener_pid -ne 0 ]; then
+        kill $listener_pid 2>/dev/null
+        listener_pid=0
+        echo "Listener stopped"
+    fi
+}
+
+cleanup()
+{
+    stop_listener
+    rm -f /tmp/listener_messages
+    exit 0
+}
+
+update_header(){
     clear
     echo "-----------------------------------------------"
     echo "test.example.com -> "
@@ -115,13 +144,20 @@ main(){
     tput cup 3 30
     echo -n "https"
     echo
+
+}
+
+main(){
+    trap cleanup SIGINT SIGTERM EXIT
+#set -- $input panaudoti "192.168.0.0  1  1  0  1"
+#                          $1         $2 $3 $4 $5
+    read_config
+    start_listener
+    update_header
     while true
     do
-        tput cup 1 21
-        echo -ne "${ips[$pointer]}${CLEAR_LINE}"
-        #clear
+        listen
         monitor_servers
-        #echo $pointer
         sleep 1
     done
 }
