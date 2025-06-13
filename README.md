@@ -1,162 +1,143 @@
 # dnswatchdog
-# Server Monitor & DNS Failover Script
+# DNS Watchdog Failover Script
 
-A bash script that monitors multiple servers and automatically updates DNS records to provide failover functionality. The script continuously monitors server availability using ping and HTTPS checks, and automatically switches DNS records to healthy servers when failures are detected.
+A bash script that monitors multiple servers and automatically updates DNS records to failover to healthy servers. Features real-time monitoring display and quorum-based decision making for high availability.
 
 ## Features
 
-- **Multi-server monitoring**: Monitor multiple servers simultaneously
-- **Dual health checks**: Uses both ping and HTTPS connectivity tests
-- **Automatic DNS failover**: Updates DNS records via nsupdate when servers fail
-- **Real-time display**: Live terminal interface showing server status
-- **Color-coded output**: Visual indicators for server health status
-- **Configurable**: Server list managed through external config file
+- **Real-time Server Monitoring**: Continuously monitors servers using ping and HTTPS checks
+- **Automatic DNS Failover**: Updates DNS records when the current server becomes unavailable
+- **Priority-based Server Selection**: Servers are ordered by priority (highest to lowest)
+- **Quorum Listening**: Receives votes from other watchdog instances via TCP socket
+- **Live Status Display**: Shows server status with color-coded indicators
+- **Graceful Shutdown**: Proper cleanup on exit (Ctrl+C)
 
-## Prerequisites
+## Files
 
-- `bash` shell
-- `ping` command
-- `curl` for HTTPS checks
-- `nc` (netcat) for port checking
-- `nsupdate` for DNS updates
-- DNS server that accepts dynamic updates
-
-## Installation
-
-1. Clone or download the script
-2. Make it executable:
-   ```bash
-   chmod +x monitor.sh
-   ```
-3. Create a config file with your server IPs (see Configuration section)
+- `watchdog.sh` - Main script
+- `watchdog.cfg` - Configuration file
 
 ## Configuration
 
-### Config File
-Create a `config` file in the same directory as the script. List one IP address per line:
-
-```
-192.168.1.10
-192.168.1.11
-192.168.1.12
-10.0.0.5
-```
-
-### Script Variables
-Edit the following variables in the script to match your environment:
+Edit `watchdog.cfg` to customize settings:
 
 ```bash
-DNS_SERVER="127.0.0.1"        # Your DNS server IP
-ZONE="example.com"            # Your DNS zone
-RECORD="test.example.com"     # The DNS record to update
+# DNS Settings
+DNS_SERVER="127.0.0.1"
+ZONE="example.com" 
+RECORD="test.example.com"
+
+# Monitoring Method
+method="ping"           # ping, https, or port
+ping_count=1
+ping_timeout=1
+
+# Server List (priority order: highest to lowest)
+ips=("172.16.0.3" "1.1.1.1" "8.8.8.8")
+
+# Quorum Settings
+listen_port=25565
+```
+
+## Requirements
+
+- `socat` - for TCP socket communication
+- `nsupdate` - for DNS record updates
+- `curl` - for HTTPS health checks (if using https method)
+- `nc` (netcat) - for port checks (if using port method)
+
+Install dependencies:
+```bash
+# Ubuntu/Debian
+sudo apt install socat bind9-dnsutils curl netcat-openbsd
+
+# CentOS/RHEL
+sudo yum install socat bind-utils curl nmap-ncat
 ```
 
 ## Usage
 
-Run the script:
-```bash
-./monitor.sh
-```
+1. Make script executable:
+   ```bash
+   chmod +x watchdog.sh
+   ```
 
-The script will:
-1. Load server IPs from the config file
-2. Display a real-time monitoring interface
-3. Continuously check server health
-4. Automatically update DNS records when failures occur
+2. Run the script:
+   ```bash
+   ./watchdog.sh
+   ```
 
-### Display Interface
+3. Stop gracefully:
+   ```bash
+   # Press Ctrl+C (not Ctrl+Z)
+   ```
+
+## How It Works
+
+1. **Initialization**: Reads configuration and starts TCP listener on port 25565
+2. **Monitoring Loop**: 
+   - Checks all servers every 0.5 seconds
+   - Displays real-time status (green=ok, red=down)
+   - Monitors current active server
+3. **Failover Logic**:
+   - When current server fails, sends "next" message to other instances
+   - Collects votes from other watchdog instances
+   - Updates DNS when vote threshold is met (currently >2 votes)
+4. **DNS Update**: Uses `nsupdate` to change A record to next available server
+
+## Display
+
+The script shows a live dashboard:
 
 ```
 -----------------------------------------------
-test.example.com -> 192.168.1.10
+test.example.com -> 172.16.0.3
+DNS_SERVER: 127.0.0.1
+ping_timeout: 1
 -----------------------------------------------
-   IP                  ping     https
-192.168.1.10          ok       ok
-192.168.1.11          down     down
-192.168.1.12          ok       ok
+
+   IP               ping    https
+172.16.0.3          ok      ok
+1.1.1.1            down     down
+8.8.8.8             ok      ok
 ```
 
-## Health Check Methods
+## Quorum Communication
 
-The script supports three health check methods:
+- Listens on TCP port 25565 for votes from other instances
+- Sends "next" messages to trigger failover voting
+- Prevents split-brain scenarios in multi-instance deployments
 
-1. **ping**: ICMP ping test (1 second timeout)
-2. **https**: HTTPS connectivity test (2 second timeout)
-3. **port**: TCP port 80 connectivity test (2 second timeout)
+## Monitoring Methods
 
-Currently, the monitoring loop uses ping and HTTPS checks.
+Choose monitoring method in config:
 
-## DNS Failover Logic
+- **ping**: ICMP ping check (default)
+- **https**: HTTPS connectivity test  
+- **port**: TCP port connectivity check
 
-- Servers are prioritized by their order in the config file
-- The script maintains a pointer to the current active server
-- When the active server fails, it switches to the next available healthy server
-- When a higher-priority server comes back online, it switches back
-- DNS updates are performed using nsupdate with a 60-second TTL
+## Planned Features
 
-## DNS Server Requirements
-
-Your DNS server must:
-- Accept dynamic updates via nsupdate
-- Be properly configured with the appropriate zone
-- Allow updates from the machine running this script
-
-For BIND9, you might need to configure update policies in your zone configuration.
-
-## Customization
-
-### Adding New Health Check Methods
-You can extend the `check_server()` function to add new monitoring methods:
-
-```bash
-check_server() {
-  ip="$1"
-  method="$2"
-  case $method in
-    # ... existing methods ...
-    http)
-      curl -s --max-time 2 "http://$ip" > /dev/null && return 0
-      ;;
-  esac
-  return 1
-}
-```
-
-### Modifying Check Intervals
-Change the sleep duration in the main loop:
-```bash
-sleep 5  # Check every 5 seconds instead of 1
-```
+- ✅ Basic server monitoring and DNS failover
+- ✅ Quorum-based decision making
+- 🚧 **Coming Next**: Voting mechanism to return to higher priority servers
+- 🔄 Configurable vote thresholds
+- 📊 Health check scoring system
 
 ## Troubleshooting
 
-### Common Issues
+**Script won't start**:
+- Check if `socat` is installed
+- Verify port 25565 is not in use: `netstat -tlnp | grep 25565`
 
-1. **Permission denied for nsupdate**
-   - Ensure your DNS server allows dynamic updates
-   - Check TSIG keys if authentication is required
+**DNS updates failing**:
+- Verify `nsupdate` has permissions to update the DNS zone
+- Check DNS server configuration and zone settings
 
-2. **Config file not found**
-   - Ensure the `config` file exists in the script directory
-   - Check file permissions
-
-3. **Commands not found**
-   - Install required tools: `curl`, `nc`, `bind-utils` (for nsupdate)
-
-### Debug Mode
-Add `set -x` at the beginning of the script to enable debug output.
-
-## Security Considerations
-
-- The script performs DNS updates without authentication by default
-- Consider implementing TSIG authentication for production use
-- Ensure proper firewall rules for DNS update traffic
-- Run with minimal required privileges
+**Orphaned socat processes**:
+- If script exits improperly: `pkill socat`
+- Always use Ctrl+C to exit, not Ctrl+Z
 
 ## License
 
-This script is provided as-is for educational and operational purposes. Modify and distribute as needed.
-
-## Contributing
-
-Feel free to submit improvements, bug fixes, or additional features via pull requests.
+This script is provided as-is for educational and operational use.
