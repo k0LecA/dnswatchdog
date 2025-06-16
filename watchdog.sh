@@ -38,6 +38,7 @@ log(){
 
     row=$((6+ip_count))
     tput cup $row 1
+    tput ed
     echo "-----------------------------------------------"
     echo "Last logs:"
     tail $LOG_FILE
@@ -160,15 +161,20 @@ monitor_servers(){
         #if request was sent check if current server is accessible
         if ! check_server ${ips[$pointer]} "ping"
         then
-
+            log "warning" "${ips[$pointer]} not responding, sending request to change."
             send_request
         fi
     fi
 }
 
 send_request(){
-    echo "next" | socat - TCP:172.16.0.3:25565
-    request_sent=0
+    if echo "next" | socat - TCP:172.16.0.3:25565
+    then
+        log "info" "Request sent successfully"
+        request_sent=0
+    else
+        log "error" "Failed to send message (connection refused or timeout)"
+    fi
 }
 
 update_dns(){
@@ -214,8 +220,7 @@ listen(){
             if [ "$line" = "next" ]
             then
                 ((votes++))
-                tput cup 14 0
-                echo -ne "${CLEAR_LINE}votes: "$votes
+                log "info" "Got a vote, votes: ${votes}"
             fi
         done < "$LISTENER_MESSAGES"
         > "$LISTENER_MESSAGES"  # clear the file after reading
