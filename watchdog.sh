@@ -7,14 +7,20 @@ YELLOW='\e[33m'
 RESET='\e[0m'
 CLEAR_LINE='\e[K'
 
-#CONFIGS
+#FILES
 CONFIG_FILE="./watchdog.cfg"
+LOG_FILE="/var/log/watchdog.log"
+LISTENER_MESSAGES=$(mktemp)
 
 #GLOBAL VARIABLES
 declare -a ips=()
 pointer=0
 request_sent=1
 votes=0
+
+log(){
+
+}
 
 read_config(){
     [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
