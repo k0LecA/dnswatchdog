@@ -25,42 +25,49 @@ log(){
     message="$2"
     case $type in
     info)
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] INFO - ${message}" >> "$LOG_FILE"
+        echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] INFO - ${message}" >> "$LOG_FILE"
     ;;
     warning)
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARNING - ${message}" >> "$LOG_FILE"
+        echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] ${YELLOW}WARNING${RESET} - ${message}" >> "$LOG_FILE"
     ;;
     error)
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR - ${message}" >> "$LOG_FILE"
+        echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] ${RED}ERROR${RESET} - ${message}" >> "$LOG_FILE"
     ;;
     esac
 }
 
 read_config(){
-    [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+   if [[ -f "$CONFIG_FILE" ]]; then
+       source "$CONFIG_FILE"
+       log "info" "Using configuration from $CONFIG_FILE"
+   else
+       log "warning" "Configuration file $CONFIG_FILE not found, using defaults"
+   fi
 
-    #DNS
-    DNS_SERVER=${DNS_SERVER:-127.0.0.1}
-    ZONE=${ZONE:-"example.com"}
-    RECORD=${RECORD:-"test.example.com"}
+   #DNS
+   DNS_SERVER=${DNS_SERVER:-127.0.0.1}
+   ZONE=${ZONE:-"example.com"}
+   RECORD=${RECORD:-"test.example.com"}
 
-    #monitoring
-    #method="ping"
-    ping_count=${ping_count:-1}
-    ping_timeout=${ping_timeout:-1}
+   #monitoring
+   method="ping"
+   ping_count=${ping_count:-1}
+   ping_timeout=${ping_timeout:-1}
 
-    #method="https"
-    #curl_timeout=2
+   #method="https"
+   #curl_timeout=2
 
-    #method="port"
-    #port=80
+   #method="port"
+   #port=80
 
-    #quorum listening
-    #listen_port=25565
+   #quorum listening
+   listen_port=${listen_port:-25565}
 
-    #ip list
-    #sort by priority from highest to lowest
-    ips=${ips:-("172.16.0.3" "1.1.1.1" "8.8.8.8")}
+   #ip list
+   #sort by priority from highest to lowest
+   if [ ${#ips[@]} -eq 0 ]; then
+       ips=("172.16.0.3" "1.1.1.1" "8.8.8.8")
+   fi
 }
 
 check_server() {
