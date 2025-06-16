@@ -14,6 +14,7 @@ LISTENER_MESSAGES=$(mktemp)
 
 #GLOBAL VARIABLES
 declare -a ips=()
+declare -a messages=()
 pointer=0
 request_sent=1
 votes=0
@@ -128,16 +129,13 @@ send
 EOF
 
     tput cup 1 20
-    echo -ne "${CLEAR_LINE}$log(){
-
-}
-{ips[$pointer]}"
+    echo -ne "${CLEAR_LINE}${ips[$pointer]}"
 }
 
 decide(){
     if [ $votes -gt 2 ]
     then
-        pointer+=1
+        ((pointer++))
         update_dns
         votes=0
     fi
@@ -145,20 +143,21 @@ decide(){
 
 start_listener()
 {
-    socat TCP-LISTEN:25565,fork SYSTEM:'while read line; do echo "$line" >> /tmp/listener_messages; done' &
-listener_pid=$!
+    socat TCP-LISTEN:25565,fork SYSTEM:"while read line; do echo \"\$line\" >> $LISTENER_MESSAGES; done" &
+    listener_pid=$!
 }
 
 listen(){
-    if [ -f /tmp/listener_messages ]; then
+    if [ -f "$LISTENER_MESSAGES" ]; then
         while IFS= read -r line; do
             messages+=("$line")
             if [ "$line" = "next" ]
             then
-                votes+=1
+                ((votes++))
+                echo $votes
             fi
-        done < /tmp/listener_messages
-        > /tmp/listener_messages  # clear the file after reading
+        done < "$LISTENER_MESSAGES"
+        > "$LISTENER_MESSAGES"  # clear the file after reading
     fi
 }
 
@@ -207,8 +206,11 @@ main(){
     update_header
     while true
     do
+        tput cup 13 1
         listen
         decide
+        tput cup 15 1
+        echo -n "asdsadsa"
         monitor_servers 
         sleep 0.5
     done
