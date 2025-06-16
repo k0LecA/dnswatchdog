@@ -36,6 +36,30 @@ log(){
     esac
 }
 
+check_dependencies() {
+    local missing=()
+    declare -A packages=(
+        ["socat"]="socat"
+        ["ping"]="iputils-ping"
+        ["curl"]="curl" 
+        ["nc"]="netcat-openbsd"
+        ["nsupdate"]="bind9-utils"
+        ["tput"]="ncurses-bin"
+    )
+    
+    for cmd in "${!packages[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing+=("${packages[$cmd]}")
+        fi
+    done
+    
+    if [ ${#missing[@]} -ne 0 ]; then
+        echo "Error: Missing dependencies. Install with:"
+        echo "apt-get install ${missing[*]}"
+        exit 1
+    fi
+}
+
 read_config(){
    if [[ -f "$CONFIG_FILE" ]]; then
        source "$CONFIG_FILE"
@@ -127,6 +151,7 @@ monitor_servers(){
         #if request was sent check if current server is accessible
         if ! check_server ${ips[$pointer]} "ping"
         then
+
             send_request
         fi
     fi
@@ -194,6 +219,7 @@ cleanup()
 {
     stop_listener
     rm -f "$LISTENER_MESSAGES"
+    log "info" "Stopping dns watchdog"
     exit 0
 }
 
@@ -220,6 +246,7 @@ main(){
     trap cleanup SIGINT SIGTERM EXIT #proper exit with CTRL+C
 
     log info "Starting dns watchdog"
+    check_dependencies
 
     read_config #read configuration and get ip list
     start_listener #start listening with socat, will be added quorum
