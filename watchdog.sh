@@ -18,9 +18,22 @@ declare -a messages=()
 pointer=0
 request_sent=1
 votes=0
+listener_pid=0
 
 log(){
-    echo "$1" >> "$LOG_FILE"
+    type="$1"
+    message="$2"
+    case $type in
+    info)
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] INFO - ${message}" >> "$LOG_FILE"
+    ;;
+    warning)
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARNING - ${message}" >> "$LOG_FILE"
+    ;;
+    error)
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR - ${message}" >> "$LOG_FILE"
+    ;;
+    esac
 }
 
 read_config(){
@@ -51,10 +64,9 @@ read_config(){
 }
 
 check_server() {
-  ip="$1"
-  method="$2"
-
-  case $method in
+    ip="$1"
+    method="$2"
+    case $method in
     ping)
       ping -c 1 -W 1 "$ip" > /dev/null 2>&1 && return 0
       ;;
@@ -154,7 +166,8 @@ listen(){
             if [ "$line" = "next" ]
             then
                 ((votes++))
-                echo $votes
+                tput cup 14 0
+                echo -ne "${CLEAR_LINE}votes: "$votes
             fi
         done < "$LISTENER_MESSAGES"
         > "$LISTENER_MESSAGES"  # clear the file after reading
@@ -173,7 +186,7 @@ stop_listener()
 cleanup()
 {
     stop_listener
-    rm -f /tmp/listener_messages
+    rm -f "$LISTENER_MESSAGES"
     exit 0
 }
 
@@ -199,18 +212,15 @@ update_header(){
 main(){
     trap cleanup SIGINT SIGTERM EXIT #proper exit with CTRL+C
 
-    log "[$(date '+%Y-%m-%d %H:%M:%S')] - DNS WATCHDOG STARTING"
+    log info "Starting dns watchdog"
 
     read_config #read configuration and get ip list
     start_listener #start listening with socat, will be added quorum
     update_header
     while true
     do
-        tput cup 13 1
         listen
         decide
-        tput cup 15 1
-        echo -n "asdsadsa"
         monitor_servers 
         sleep 0.5
     done
