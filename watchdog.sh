@@ -14,6 +14,7 @@ LISTENER_MESSAGES=$(mktemp)
 
 #GLOBAL VARIABLES
 declare -a ips=()
+ip_count=0
 declare -a messages=()
 pointer=0
 request_sent=1
@@ -34,6 +35,12 @@ log(){
         echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] ${RED}ERROR${RESET} - ${message}" >> "$LOG_FILE"
     ;;
     esac
+
+    row=$((6+ip_count))
+    tput cup $row 1
+    echo "-----------------------------------------------"
+    echo "Last logs:"
+    tail $LOG_FILE
 }
 
 check_dependencies() {
@@ -54,8 +61,9 @@ check_dependencies() {
     done
     
     if [ ${#missing[@]} -ne 0 ]; then
-        echo "Error: Missing dependencies. Install with:"
+        echo "Error: Missing dependencies ${missing[*]}. Install with:"
         echo "apt-get install ${missing[*]}"
+        log "error" "Missing dependencies ${missing[*]}. Quiting"
         exit 1
     fi
 }
@@ -92,6 +100,7 @@ read_config(){
    if [ ${#ips[@]} -eq 0 ]; then
        ips=("172.16.0.3" "1.1.1.1" "8.8.8.8")
    fi
+   ip_count=${#ips[@]}
 }
 
 check_server() {
@@ -164,16 +173,23 @@ send_request(){
 
 update_dns(){
     NEW_IP=${ips[$pointer]}
-    nsupdate <<EOF
+    
+    if nsupdate <<EOF
 server $DNS_SERVER
 zone $ZONE
 update delete $RECORD A
 update add $RECORD 60 A $NEW_IP
 send
 EOF
-
-    tput cup 1 20
-    echo -ne "${CLEAR_LINE}${ips[$pointer]}"
+    then
+        log "info" "DNS updated: $RECORD -> $NEW_IP"
+        tput cup 1 20
+        echo -ne "${CLEAR_LINE}${GREEN}${ips[$pointer]}${RESET}"
+    else
+        log "error" "DNS update failed for $RECORD -> $NEW_IP"
+        tput cup 1 20
+        echo -ne "${CLEAR_LINE}${RED}${ips[$pointer]} (FAILED)${RESET}"
+    fi
 }
 
 decide(){
@@ -244,13 +260,14 @@ update_header(){
 
 main(){
     trap cleanup SIGINT SIGTERM EXIT #proper exit with CTRL+C
-
+    
     log info "Starting dns watchdog"
+    read_config
+    update_header
     check_dependencies
 
-    read_config #read configuration and get ip list
     start_listener #start listening with socat, will be added quorum
-    update_header
+
     while true
     do
         listen
