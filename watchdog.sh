@@ -19,7 +19,7 @@ request_sent=1
 votes=0
 
 log(){
-
+    echo "$1" >> "$LOG_FILE"
 }
 
 read_config(){
@@ -128,7 +128,10 @@ send
 EOF
 
     tput cup 1 20
-    echo -ne "${CLEAR_LINE}${ips[$pointer]}"
+    echo -ne "${CLEAR_LINE}$log(){
+
+}
+{ips[$pointer]}"
 }
 
 decide(){
@@ -196,6 +199,8 @@ update_header(){
 
 main(){
     trap cleanup SIGINT SIGTERM EXIT #proper exit with CTRL+C
+
+    log "[$(date '+%Y-%m-%d %H:%M:%S')] - DNS WATCHDOG STARTING"
 
     read_config #read configuration and get ip list
     start_listener #start listening with socat, will be added quorum
