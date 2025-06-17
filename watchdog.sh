@@ -257,24 +257,36 @@ listen(){
     if [ -f "$LISTENER_MESSAGES" ]; then
         while IFS= read -r line; do
             messages+=("$line")
-            if [ "$line" = "next" ]
+            
+            if [ $line = "next" ]
             then
                 ((votes++))
-                log "info" "Got a vote, votes: ${votes}"
+                log "info" "Got a vote to change to next ip. Votes: $votes"
             else
                 set -- $line
-                if [ "$1" = "set" ]
+                if [ $1 == "set" ]
                 then
-                    if [ "$2" = "ok" ]
+                    if [ $2 == "ok" ]
                     then
                         ((set_votes++))
-                        log "info" "Got a vote, set_votes: $set_votes"
+                        log "info" "Got a set_vote. Set_votes: $set_votes"
                     else
-                        log "info" "Got suggestion to change to $2"
-                        proposed_ip="$2"
+                        log "info" "Got a proposal for $2"
+                        if check_server "$2" "ping"
+                        then
+                            log "info" "$2 is up"
+                            new_ip_sent=1
+                            got_propose=0
+                            proposed_ip="$2"
+                            set_votes=0
+                            echo "set ok" | socat - TCP:172.16.0.3:25565
+                        fi
                     fi
                 fi
             fi
+
+
+
         done < "$LISTENER_MESSAGES"
         > "$LISTENER_MESSAGES"  # clear the file after reading
     fi
