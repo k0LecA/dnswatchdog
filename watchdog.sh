@@ -221,13 +221,13 @@ EOF
 }
 
 decide(){
-    if [ $votes -gt 1 ]
+    if [ $votes -gt 0 ]
     then
         ((pointer++))
         update_dns "${ips[$pointer]}"
         votes=0
     fi
-    if [ $set_votes -gt 1 ]
+    if [ $set_votes -gt 0 ]
     then
         for i in "${!ips[@]}"
         do
@@ -275,7 +275,6 @@ listen(){
                         if check_server "$2" "ping"
                         then
                             log "info" "$2 is up"
-                            new_ip_sent=1
                             got_propose=0
                             proposed_ip="$2"
                             set_votes=0
