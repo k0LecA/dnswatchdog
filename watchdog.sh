@@ -1,5 +1,7 @@
 #!/bin/bash
 
+#v1.0
+
 #COLORS
 RED='\e[31m'
 GREEN='\e[32m'
@@ -14,12 +16,13 @@ LISTENER_MESSAGES=$(mktemp)
 
 #GLOBAL VARIABLES
 declare -a ips=()
+declare -a wdips=()
 ip_count=0
 declare -a messages=()
 pointer=0
 request_sent=1
 new_ip_sent=1
-got_propose=1
+#got_propose=1
 proposed_ip=""
 votes=0
 set_votes=0
@@ -74,12 +77,14 @@ check_dependencies() {
 }
 
 read_config(){
-   if [[ -f "$CONFIG_FILE" ]]; then
-       source "$CONFIG_FILE"
-       log "info" "Using configuration from $CONFIG_FILE"
-   else
-       log "warning" "Configuration file $CONFIG_FILE not found, using defaults"
-   fi
+    if [[ -f "$CONFIG_FILE" ]]
+    then
+        # shellcheck disable=SC1090
+        source "$CONFIG_FILE"
+        log "info" "Using configuration from $CONFIG_FILE"
+    else
+        log "warning" "Configuration file $CONFIG_FILE not found, using defaults"
+    fi
 
    #DNS
    DNS_SERVER=${DNS_SERVER:-127.0.0.1}
@@ -106,6 +111,10 @@ read_config(){
        ips=("172.16.0.3" "1.1.1.1" "8.8.8.8")
    fi
    ip_count=${#ips[@]}
+
+   if [ ${#wdips[@]} -eq 0 ]; then
+       wdips=("172.16.0.3" "172.16.0.4")
+   fi
 }
 
 check_server() {
@@ -141,7 +150,7 @@ monitor_servers(){
         if check_server "$ip" "ping"
         then
             echo -en "${GREEN}ok${RESET}${CLEAR_LINE}"
-            if [ $i -lt $pointer ]
+            if [ "$i" -lt "$pointer" ]
             then
                 if [ $new_ip_sent -eq 1 ]
                 then
@@ -168,28 +177,35 @@ monitor_servers(){
         if [ $request_sent -eq 1 ]
         then
             #if request was sent check if current server is accessible
-            if ! check_server ${ips[$pointer]} "ping"
+            if ! check_server "${ips[$pointer]}" "ping"
             then
                 log "warning" "${ips[$pointer]} not responding, sending request to change."
-                send_request
+                send_request "next"
             fi
         fi
     fi
 }
 
 send_request(){
-    if echo "next" | socat - TCP:172.16.0.3:25565
-    then
-        log "info" "Request sent successfully"
-        request_sent=0
-    else
-        log "error" "Failed to send message (connection refused or timeout)"
-    fi
+    message="$1"
+    for i in "${!wdips[@]}"
+    do
+        wdip="${wdips[$i]}"
+        if echo "$message" | socat - TCP:"$wdip":25565
+        then
+            #log "info" "Request sent to $wdip successfully"
+            request_sent=0
+            return 0
+        else
+            log "error" "Failed to send message to $wdip (connection refused or timeout)"
+            return 1
+        fi
+    done
 }
 
 propose_ip(){
     NEW_IP=$1
-    if echo "set ${NEW_IP}" | socat - TCP:172.16.0.3:25565
+    if send_request "set $NEW_IP"
     then
         log "info" "Suggested ${NEW_IP} sent successfully"
         new_ip_sent=0
@@ -212,11 +228,11 @@ EOF
     then
         log "info" "DNS updated: $RECORD -> $NEW_IP"
         tput cup 1 20
-        echo -ne "${CLEAR_LINE}${GREEN}${ips[$pointer]}${RESET}"
+        echo -ne "${CLEAR_LINE}${GREEN}$NEW_IP${RESET}"
     else
         log "error" "DNS update failed for $RECORD -> $NEW_IP"
         tput cup 1 20
-        echo -ne "${CLEAR_LINE}${RED}${ips[$pointer]} (FAILED)${RESET}"
+        echo -ne "${CLEAR_LINE}${RED}$NEW_IP (FAILED)${RESET}"
     fi
 }
 
@@ -258,34 +274,40 @@ listen(){
         while IFS= read -r line; do
             messages+=("$line")
             
-            if [ $line = "next" ]
+            if [ "$line" = "next" ]
             then
                 ((votes++))
                 log "info" "Got a vote to change to next ip. Votes: $votes"
             else
                 set -- $line
-                if [ $1 == "set" ]
+                if [ "$1" == "set" ]
                 then
-                    if [ $2 == "ok" ]
+                    if [ "$2" == "ok" ]
                     then
                         ((set_votes++))
                         log "info" "Got a set_vote. Set_votes: $set_votes"
                     else
-                        log "info" "Got a proposal for $2"
-                        if check_server "$2" "ping"
+                        if [ "$3" == "force" ]
                         then
-                            log "info" "$2 is up"
-                            got_propose=0
-                            proposed_ip="$2"
-                            set_votes=0
-                            echo "set ok" | socat - TCP:172.16.0.3:25565
+                            update_dns "$2"
+                            log "warning" "forced to $2"
+                            break
+                        else
+                            log "info" "Got a proposal for $2"
+                            if check_server "$2" "ping"
+                            then
+                                log "info" "$2 is up"
+                                #got_propose=0
+                                proposed_ip="$2"
+                                set_votes=0
+                                send_request "set ok"
+                            fi
                         fi
                     fi
+                else
+                    log "warning" "Unknown command: $1"
                 fi
             fi
-
-
-
         done < "$LISTENER_MESSAGES"
         > "$LISTENER_MESSAGES"  # clear the file after reading
     fi
@@ -313,9 +335,9 @@ update_header(){
     tput civis
     clear
     echo "-----------------------------------------------"
-    echo "test.example.com -> "${ips[$pointer]}
-    echo "DNS_SERVER: "$DNS_SERVER
-    echo "ping_timeout: " $ping_timeout
+    echo "test.example.com -> ${ips[$pointer]}"
+    echo "DNS_SERVER: $DNS_SERVER"
+    echo "ping_timeout: $ping_timeout"
     echo "-----------------------------------------------"
 
     #     row  column
