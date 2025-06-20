@@ -27,6 +27,8 @@ proposed_ip=""
 votes=0
 set_votes=0
 listener_pid=0
+cycles=0
+n=5
 
 log(){
     type="$1"
@@ -201,69 +203,86 @@ send_request(){
     for i in "${!wdips[@]}"
     do
         wdip="${wdips[$i]}"
-        if echo "$message" | socat - TCP:"$wdip":25565
-        then
+        echo "$message" | socat - TCP:"$wdip":25565
+        #if [[ $? -eq 0 ]]
+        #then
             #log "info" "Request sent to $wdip successfully"
-            request_sent=0
-            return 0
-        else
-            log "error" "Failed to send message to $wdip (connection refused or timeout)"
-            return 1
-        fi
+            #request_sent=0
+        #else
+            #log "error" "Failed to send message to $wdip (connection refused or timeout)"
+        #fi
     done
 }
 
 propose_ip(){
-    NEW_IP=$1
-    if send_request "propose $NEW_IP"
+    ((cycles++))
+    if [ $cycles -eq $n ]
     then
-        log "info" "Suggested ${NEW_IP} sent successfully"
-        new_ip_sent=0
-        proposed_ip="$NEW_IP"
-    else
-        log "error" "Failed to propose ${NEW_IP} (connection refused or timeout)"
+        NEW_IP=$1
+        if send_request "propose $NEW_IP"
+        then
+            log "info" "Suggested ${NEW_IP} sent successfully"
+            new_ip_sent=0
+            proposed_ip="$NEW_IP"
+        else
+            log "error" "Failed to propose ${NEW_IP} (connection refused or timeout)"
+        fi
+        cycles=0
     fi
 }
 
 update_dns(){
-    NEW_IP=$1
+    new_ip="$1"
     
     if nsupdate <<EOF
 server $DNS_SERVER
 zone $ZONE
 update delete $RECORD A
-update add $RECORD 60 A $NEW_IP
+update add $RECORD 60 A $new_ip
 send
 EOF
     then
-        log "info" "DNS updated: $RECORD -> $NEW_IP"
+        log "info" "DNS updated: $RECORD -> $new_ip"
         tput cup 1 23
-        echo -ne "${CLEAR_LINE}${GREEN}$NEW_IP${RESET}"
+        echo -ne "${CLEAR_LINE}${GREEN}$new_ip${RESET}"
+        
+        # Update pointer to reflect new active IP
+        for i in "${!ips[@]}"; do
+            if [[ "${ips[$i]}" == "$new_ip" ]]
+            then
+                pointer=$i
+                break
+            fi
+        done
+        
+        # Reset voting states
+        votes=0
+        set_votes=0
+        new_ip_sent=1
+        request_sent=1
+        
+        return 0
     else
-        log "error" "DNS update failed for $RECORD -> $NEW_IP"
-        tput cup 1 23
-        echo -ne "${CLEAR_LINE}${RED}$NEW_IP (FAILED)${RESET}"
+        log "error" "DNS update failed for $RECORD -> $new_ip"
+        tput cup 1 25
+        echo -ne "${CLEAR_LINE}${RED}$new_ip (FAILED)${RESET}"
+        return 1
     fi
 }
 
 decide(){
-    if [ $votes -gt 0 ]
+    # "propose" votes (switch to specific IP)
+    if [ "$set_votes" -ge "$majority_needed" ] && [ -n "$proposed_ip" ]
     then
-        ((pointer++))
-        update_dns "${ips[$pointer]}"
-        votes=0
-    fi
-    if [ $set_votes -gt 0 ]
-    then
-        for i in "${!ips[@]}"
-        do
-            if [[ "${ips[$i]}" == "$proposed_ip" ]]; then
-            pointer=$i
-            break
-            fi
-        done
-        update_dns "$proposed_ip"
-        set_votes=0
+        log "info" "Majority reached for proposed IP $proposed_ip ($set_votes/$majority_needed)"
+        if check_server "$proposed_ip" "$method"
+        then
+            update_dns "$proposed_ip"
+            set_votes=0
+        else
+            log "warning" "Proposed IP $proposed_ip is no longer available"
+            set_votes=0
+        fi
     fi
 }
 
@@ -323,10 +342,12 @@ listen(){
                                 proposed_ip="$proposed_ip_candidate"
                                 set_votes=1
                                 log "info" "New proposal for $proposed_ip. Votes: $set_votes/$majority_needed"
+                                send_request "propose $proposed_ip"
                             else
                                 # Same proposal, increment votes
                                 ((set_votes++))
                                 log "info" "Vote for proposed IP $proposed_ip. Votes: $set_votes/$majority_needed"
+                                
                             fi
                         else
                             log "warning" "Proposed IP $proposed_ip_candidate is not in our IP list"
@@ -353,22 +374,23 @@ listen(){
     fi
 }
 
-stop_listener()
-{
-    if [ $listener_pid -ne 0 ]
+stop_listener(){
+    if [ "$listener_pid" -ne 0 ]
     then
-        kill $listener_pid 2>/dev/null
+        kill "$listener_pid" 2>/dev/null
+        wait "$listener_pid" 2>/dev/null
         listener_pid=0
         log "info" "Listener stopped"
     fi
 }
 
-cleanup()
-{
+cleanup(){
+    log "info" "Shutting down DNS watchdog"
     stop_listener
     rm -f "$LISTENER_MESSAGES"
-    log "info" "Stopping dns watchdog"
     tput cnorm
+    clear
+    echo "DNS Watchdog stopped"
     exit 0
 }
 
@@ -387,11 +409,20 @@ update_header(){
 main(){
     trap cleanup SIGINT SIGTERM EXIT #proper exit with CTRL+C
     
-    log info "Starting dns watchdog"
+    log info "Starting DNS watchdog"
     read_config
     update_header
     check_dependencies
     start_listener #start listening with socat, will be added quorum
+
+    # Find current active IP
+    pointer=$(find_best_available_ip)
+    if [ "$pointer" -eq -1 ]; then
+        log "error" "No servers are available at startup!"
+        exit 1
+    fi
+    
+    log "info" "Starting with IP: ${ips[$pointer]}"
 
     while true
     do
