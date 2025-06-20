@@ -43,7 +43,7 @@ log(){
     ;;
     esac
 
-    row=$((6+ip_count))
+    row=$((7+ip_count))
     tput cup $row 0
     tput ed
     echo "-----------------------------------------------"
@@ -86,55 +86,48 @@ read_config(){
         log "warning" "Configuration file $CONFIG_FILE not found, using defaults"
     fi
 
-   #DNS
-   DNS_SERVER=${DNS_SERVER:-127.0.0.1}
-   ZONE=${ZONE:-"example.com"}
-   RECORD=${RECORD:-"test.example.com"}
+    #DNS
+    DNS_SERVER=${DNS_SERVER:-127.0.0.1}
+    ZONE=${ZONE:-"example.com"}
+    RECORD=${RECORD:-"test.example.com"} 
+ 
+    #monitoring
+    method=${method:-"ping"}
+    ping_count=${ping_count:-1}
+    ping_timeout=${ping_timeout:-2}
+    curl_timeout=${curl_timeout:-3}
+    port=${port:-80}
+    #curl_timeout=2
+    if [ ${#ips[@]} -eq 0 ]; then
+        ips=("172.16.0.3" "1.1.1.1" "8.8.8.8")
+    fi
+    ip_count=${#ips[@]}
 
-   #monitoring
-   method="ping"
-   ping_count=${ping_count:-1}
-   ping_timeout=${ping_timeout:-1}
-
-   #method="https"
-   #curl_timeout=2
-
-   #method="port"
-   #port=80
-
-   #quorum listening
-   listen_port=${listen_port:-25565}
-
-   #ip list
-   #sort by priority from highest to lowest
-   if [ ${#ips[@]} -eq 0 ]; then
-       ips=("172.16.0.3" "1.1.1.1" "8.8.8.8")
-   fi
-   ip_count=${#ips[@]}
-
-   if [ ${#wdips[@]} -eq 0 ]; then
-       wdips=("172.16.0.3" "172.16.0.4")
-   fi
+    #quorum listening
+    listen_port=${listen_port:-25565}
+    majority_needed=$(( (${#wdips[@]} / 2) + 1 ))
+    if [ ${#wdips[@]} -eq 0 ]; then
+        wdips=("172.16.0.3" "172.16.0.4")
+    fi
 }
 
 check_server() {
     ip="$1"
-    method="$2"
-    case $method in
+    check_method="$2"
+    
+    case $check_method in
     ping)
-      ping -c 1 -W 1 "$ip" > /dev/null 2>&1 && return 0
-      ;;
+        ping -c "$ping_count" -W "$ping_timeout" "$ip" > /dev/null 2>&1 && return 0
+        ;;
     https)
-      curl -s --max-time 2 "https://$ip" > /dev/null && return 0
-      ;;
+        curl -s --max-time "$curl_timeout" "https://$ip" > /dev/null 2>&1 && return 0
+        ;;
     port)
-      nc -z -w 2 "$ip" 80 && return 0
-      ;;
-  esac
-
-  return 1
+        nc -z -w "$curl_timeout" "$ip" "$port" > /dev/null 2>&1 && return 0
+        ;;
+    esac
+    return 1
 }
-
 
 monitor_servers(){
     #monitor all servers
@@ -142,12 +135,12 @@ monitor_servers(){
     do
         ip="${ips[$i]}"
 
-        row=$((6+i))
+        row=$((7+i))
         tput cup $row 0
         echo -n "$ip"
         
         tput cup $row 21
-        if check_server "$ip" "ping"
+        if check_server "$ip" "$method"
         then
             echo -en "${GREEN}ok${RESET}${CLEAR_LINE}"
             if [ "$i" -lt "$pointer" ]
@@ -157,14 +150,6 @@ monitor_servers(){
                     propose_ip "$ip"
                 fi
             fi
-        else
-            echo -en "${RED}down${RESET}${CLEAR_LINE}"
-        fi
-
-        tput cup $row 32
-        if check_server "$ip" "https"
-        then
-            echo -en "${GREEN}ok${RESET}${CLEAR_LINE}"
         else
             echo -en "${RED}down${RESET}${CLEAR_LINE}"
         fi
@@ -227,11 +212,11 @@ send
 EOF
     then
         log "info" "DNS updated: $RECORD -> $NEW_IP"
-        tput cup 1 20
+        tput cup 1 23
         echo -ne "${CLEAR_LINE}${GREEN}$NEW_IP${RESET}"
     else
         log "error" "DNS update failed for $RECORD -> $NEW_IP"
-        tput cup 1 20
+        tput cup 1 23
         echo -ne "${CLEAR_LINE}${RED}$NEW_IP (FAILED)${RESET}"
     fi
 }
@@ -334,21 +319,14 @@ cleanup()
 update_header(){
     tput civis
     clear
-    echo "-----------------------------------------------"
-    echo "test.example.com -> ${ips[$pointer]}"
-    echo "DNS_SERVER: $DNS_SERVER"
-    echo "ping_timeout: $ping_timeout"
-    echo "-----------------------------------------------"
-
-    #     row  column
-    tput cup 5 3
-    echo -n "IP"
-    tput cup 5 20
-    echo -n "ping"
-    tput cup 5 30
-    echo -n "https"
+    echo "==============================================="
+    echo "DNS Watchdog - Active: ${ips[$pointer]}"
+    echo "DNS Server: $DNS_SERVER | Zone: $ZONE"
+    echo "Record: $RECORD"
+    echo "Method: $method | Quorum: $majority_needed/${#wdips[@]}"
+    echo "==============================================="
+    echo "Votes: next=$votes, propose=$set_votes (need $majority_needed)"
     echo
-
 }
 
 main(){
