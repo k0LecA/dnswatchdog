@@ -215,7 +215,7 @@ send_request(){
 
 propose_ip(){
     NEW_IP=$1
-    if send_request "set $NEW_IP"
+    if send_request "propose $NEW_IP"
     then
         log "info" "Suggested ${NEW_IP} sent successfully"
         new_ip_sent=0
@@ -267,65 +267,96 @@ decide(){
     fi
 }
 
-start_listener()
-{
-    if socat TCP-LISTEN:25565,fork SYSTEM:"while read line; do echo \"\$line\" >> $LISTENER_MESSAGES; done" &
+start_listener(){
+    if socat TCP-LISTEN:$listen_port,fork,reuseaddr SYSTEM:"while read line; do echo \"\$line\" >> $LISTENER_MESSAGES; done" &
     then
         listener_pid=$!
-        log "info" "Listener started successfully :)"
+        log "info" "Listener started on port $listen_port (PID: $listener_pid)"
+        return 0
     else
-        log "error" "Listener failed to start."
+        log "error" "Failed to start listener on port $listen_port"
+        return 1
     fi
-
 }
 
 listen(){
-    if [ -f "$LISTENER_MESSAGES" ]; then
-        while IFS= read -r line; do
-            messages+=("$line")
-            
-            if [ "$line" = "next" ]
+    if [ -f "$LISTENER_MESSAGES" ] && [ -s "$LISTENER_MESSAGES" ]
+    then
+        while IFS= read -r line
+        do
+            if [ -z "$line" ]
             then
-                ((votes++))
-                log "info" "Got a vote to change to next ip. Votes: $votes"
-            else
-                set -- $line
-                if [ "$1" == "set" ]
-                then
-                    if [ "$2" == "ok" ]
+                continue
+            fi
+            
+            log "info" "Received: $line"
+            
+            case "$line" in
+                "next")
+                    ((votes++))
+                    log "info" "Vote for 'next' received. Total votes: $votes/$majority_needed"
+                    ;;
+                propose\ *)
+                    local proposed_ip_candidate
+                    proposed_ip_candidate=$(echo "$line" | cut -d' ' -f2)
+                    
+                    if [ -n "$proposed_ip_candidate" ]
                     then
-                        ((set_votes++))
-                        log "info" "Got a set_vote. Set_votes: $set_votes"
-                    else
-                        if [ "$3" == "force" ]
-                        then
-                            update_dns "$2"
-                            log "warning" "forced to $2"
-                            break
-                        else
-                            log "info" "Got a proposal for $2"
-                            if check_server "$2" "ping"
+                        log "info" "Proposal received for $proposed_ip_candidate"
+                        
+                        # Validate the proposed IP is in our list
+                        local ip_valid=0
+                        for ip in "${ips[@]}"
+                        do
+                            if [ "$ip" = "$proposed_ip_candidate" ]
                             then
-                                log "info" "$2 is up"
-                                #got_propose=0
-                                proposed_ip="$2"
-                                set_votes=0
-                                send_request "set ok"
+                                ip_valid=1
+                                break
                             fi
+                        done
+                        
+                        if [ "$ip_valid" -eq 1 ]
+                        then
+                            if [ "$proposed_ip_candidate" != "$proposed_ip" ]
+                            then
+                                # New proposal, reset votes
+                                proposed_ip="$proposed_ip_candidate"
+                                set_votes=1
+                                log "info" "New proposal for $proposed_ip. Votes: $set_votes/$majority_needed"
+                            else
+                                # Same proposal, increment votes
+                                ((set_votes++))
+                                log "info" "Vote for proposed IP $proposed_ip. Votes: $set_votes/$majority_needed"
+                            fi
+                        else
+                            log "warning" "Proposed IP $proposed_ip_candidate is not in our IP list"
                         fi
                     fi
-                else
-                    log "warning" "Unknown command: $1"
-                fi
-            fi
+                    ;;
+                force\ *)
+                    local forced_ip
+                    forced_ip=$(echo "$line" | cut -d' ' -f2)
+                    log "warning" "Force command received for $forced_ip"
+                    
+                    if [ -n "$forced_ip" ]; then
+                        update_dns "$forced_ip"
+                    fi
+                    ;;
+                *)
+                    log "warning" "Unknown command: $line"
+                    ;;
+            esac
         done < "$LISTENER_MESSAGES"
-        > "$LISTENER_MESSAGES"  # clear the file after reading
+        
+        # Clear the messages file
+        > "$LISTENER_MESSAGES"
     fi
 }
 
 stop_listener()
 {
-    if [ $listener_pid -ne 0 ]; then
+    if [ $listener_pid -ne 0 ]
+    then
         kill $listener_pid 2>/dev/null
         listener_pid=0
         log "info" "Listener stopped"
