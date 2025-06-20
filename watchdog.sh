@@ -62,13 +62,16 @@ check_dependencies() {
         ["tput"]="ncurses-bin"
     )
     
-    for cmd in "${!packages[@]}"; do
-        if ! command -v "$cmd" &> /dev/null; then
+    for cmd in "${!packages[@]}"
+    do
+        if ! command -v "$cmd" &> /dev/null
+        then
             missing+=("${packages[$cmd]}")
         fi
     done
     
-    if [ ${#missing[@]} -ne 0 ]; then
+    if [ ${#missing[@]} -ne 0 ]
+    then
         echo "Error: Missing dependencies ${missing[*]}. Install with:"
         echo "apt-get install ${missing[*]}"
         log "error" "Missing dependencies ${missing[*]}. Quiting"
@@ -98,7 +101,8 @@ read_config(){
     curl_timeout=${curl_timeout:-3}
     port=${port:-80}
     #curl_timeout=2
-    if [ ${#ips[@]} -eq 0 ]; then
+    if [ ${#ips[@]} -eq 0 ]
+    then
         ips=("172.16.0.3" "1.1.1.1" "8.8.8.8")
     fi
     ip_count=${#ips[@]}
@@ -106,7 +110,8 @@ read_config(){
     #quorum listening
     listen_port=${listen_port:-25565}
     majority_needed=$(( (${#wdips[@]} / 2) + 1 ))
-    if [ ${#wdips[@]} -eq 0 ]; then
+    if [ ${#wdips[@]} -eq 0 ]
+    then
         wdips=("172.16.0.3" "172.16.0.4")
     fi
 }
@@ -129,45 +134,65 @@ check_server() {
     return 1
 }
 
+find_best_available_ip() {
+    # Find the highest priority IP that's available
+    for i in "${!ips[@]}"
+    do
+        if check_server "${ips[$i]}" "$method"
+        then
+            echo "$i"
+            return 0
+        fi
+    done
+    echo "-1"  # No IP available
+}
+
 monitor_servers(){
-    #monitor all servers
+    current_ip="${ips[$pointer]}"
+    
+    # Display monitoring status
     for i in "${!ips[@]}"
     do
         ip="${ips[$i]}"
-
         row=$((7+i))
-        tput cup $row 0
-        echo -n "$ip"
         
-        tput cup $row 21
+        tput cup $row 0
+        if [ "$i" -eq "$pointer" ]
+        then
+            echo -n "* $ip"
+        else
+            echo -n "  $ip"
+        fi
+        
+        tput cup $row 25
         if check_server "$ip" "$method"
         then
-            echo -en "${GREEN}ok${RESET}${CLEAR_LINE}"
-            if [ "$i" -lt "$pointer" ]
-            then
-                if [ $new_ip_sent -eq 1 ]
-                then
-                    propose_ip "$ip"
-                fi
-            fi
+            echo -en "${GREEN}UP${RESET}${CLEAR_LINE}"
         else
-            echo -en "${RED}down${RESET}${CLEAR_LINE}"
+            echo -en "${RED}DOWN${RESET}${CLEAR_LINE}"
         fi
     done
 
-    #check current ip
-    #check if request was sent
-    if [ $new_ip_sent -eq 1 ]
+    # Check if we need to switch
+    best_available_index=$(find_best_available_ip)  
+    if [ "$best_available_index" -eq -1 ]; then
+        log "error" "No servers are available!"
+        return
+    fi
+    
+    # If current server is down, initiate switch
+    if ! check_server "$current_ip" "$method"
     then
-        if [ $request_sent -eq 1 ]
+        log "warning" "Current server $current_ip is down"
+        if [ "$best_available_index" -ne "$pointer" ]
         then
-            #if request was sent check if current server is accessible
-            if ! check_server "${ips[$pointer]}" "ping"
-            then
-                log "warning" "${ips[$pointer]} not responding, sending request to change."
-                send_request "next"
-            fi
+            log "info" "Proposing switch to ${ips[$best_available_index]}"
+            propose_ip "${ips[$best_available_index]}"
         fi
+    # If a higher priority server becomes available, switch to it
+    elif [ "$best_available_index" -lt "$pointer" ]; then
+        log "info" "Higher priority server ${ips[$best_available_index]} is available"
+        propose_ip "${ips[$best_available_index]}"
     fi
 }
 
@@ -326,7 +351,6 @@ update_header(){
     echo "Method: $method | Quorum: $majority_needed/${#wdips[@]}"
     echo "==============================================="
     echo "Votes: next=$votes, propose=$set_votes (need $majority_needed)"
-    echo
 }
 
 main(){
